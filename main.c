@@ -16,8 +16,6 @@ void print_usage(void) {
     printf("Usage: ioulive64 [-v [-v]] -i <interface> [-n NETMAP] <instance ID>\n");
 }
 
-#define EXIt_FAILURE -1
-
 
 // -----------------
 // Main
@@ -46,7 +44,7 @@ int main (int argc, char *argv[] )
     // Make sure the binary has the appropriate capability set:
     //    sudo setcap cap_net_raw=eip ./ioulive64
     if ( (raw_fd = create_raw_socket (intf_name, &eth_id)) == -1 ) {
-		printf ("Error: can not create Ethernet socket:\n");
+		fprintf(stderr, "Error creating Ethernet socket on '%s': %s\n", intf_name, strerror(errno));
         printf ("  Invalid Ethernet device specified or insufficent privileges\n");
         printf ("  Make sure that %s program has received *cap_net_raw* privileges\n", argv[0]);
         printf ("  Please consider running follwing command\n");
@@ -55,13 +53,23 @@ int main (int argc, char *argv[] )
 		exit(EXIT_FAILURE);
     }
 
+    // Ensure /tmp/netio directory exists
+    char dir_path[128];
+    snprintf(dir_path, sizeof(dir_path), "/tmp/netio%u", getuid());
+    if (mkdir(dir_path, 0755) < 0 && errno != EEXIST) {
+        perror("mkdir: can not create directory for sockets");
+        return -1;
+    }
+
     // start the threads for handling data
     pthread_t eth_tid, iou_tid;
     struct S_ioulive_args args = { raw_fd, eth_id,  instance,  peer };
 
-    pthread_create(&eth_tid, NULL, iou_to_ethernet, &args);
-    pthread_create(&iou_tid, NULL, ethernet_to_iou, &args);
-
+    if (    pthread_create(&eth_tid, NULL, iou_to_ethernet, &args) != 0
+         && pthread_create(&iou_tid, NULL, ethernet_to_iou, &args) != 0 ) {
+        perror("pthread_create (eth_tid)");
+        exit(EXIT_FAILURE);
+    }
     sleep(3);
     printf ("Hit Ctrl-C to stop process\n");
     // And wait for Ctrl-C....

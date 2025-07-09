@@ -1,65 +1,105 @@
-IOUlive64 is an open-source drop-in replacement for IOUlive, a proprietary
-application written by cisco Systems, Inc.
+# IOUlive64
 
-IOUlive64 allows you to "bridge" virtual routers and switches running on
-the Cisco IOS-on-UNIX (IOU) software to a physical network.
+**IOUlive64** is an open-source, drop-in replacement for **IOUlive**, a proprietary bridging tool originally developed by Cisco Systems, Inc.
 
-ioulive64 is a refactor from IOUlive86 which has been developed by an author 
-who wishes to remain anonymous.
+It allows you to connect **Cisco IOU (IOS-on-UNIX)** virtual routers and switches to a **physical Ethernet network**, by bridging IOU interfaces with real interfaces on your system.
 
-The source code of the original project is maintained by Jeremy L. Gaddis <jlgaddis@gnu.org>
-and hosted at https://github.com/jlgaddis/ioulive86/
+---
 
-IOUlive64 is licensed under the terms of version 2 of the GNU General
-Public License. See the enclosed LICENSE.txt file for more details.
+## About
 
+IOUlive64 is a modern refactor of [IOUlive86](https://github.com/jlgaddis/ioulive86), originally maintained by an anonymous developer.
 
-🚀 Usage
+This version was restructured for better maintainability, clearer threading logic, and safe system integration. It supports raw Ethernet sockets via UNIX domain sockets in a non-root-friendly way.
 
-IOUlive64 bridges a virtual IOU router interface to a physical Ethernet interface, enabling packet exchange between virtual and real networks.
-🛠️ 1. Build the application
+> Maintained by: Jeremy L. Gaddis  
+> Source: [github.com/jlgaddis/ioulive86](https://github.com/jlgaddis/ioulive86)
 
-Make sure you have a C compiler (e.g., gcc) and the necessary development headers:
+Licensed under the **GNU General Public License v2**. See the [LICENSE.txt](./LICENSE.txt) file for details.
 
+---
+
+## Usage
+
+IOUlive64 bridges an IOU virtual interface with a physical Ethernet interface. This allows packets from a virtual lab to reach a real LAN.
+
+### 1. Build the application
+
+Make sure you have `make` and a C compiler (`gcc`):
+
+```bash
 make
+```
 
-This should produce an executable named ioulive64.
-🔒 2. Grant permission for raw socket access
+This will produce an executable called ioulive64.
 
-To avoid running ioulive64 as root, give it permission to open raw sockets:
-
+### 2. Grant raw socket permissions
+To allow the app to capture/send raw Ethernet frames without using root:
+```
 sudo setcap cap_net_raw=eip ./ioulive64
+```
 
-    📌 This allows ioulive64 to capture/send raw Ethernet frames without requiring root privileges.
+### 3. Run IOUlive64
 
-📁 3. Create the UNIX socket directory
-
-Make sure the required socket directory exists:
-
-mkdir -p /tmp/netio$(id -u)
-
-🚦 4. Run IOUlive64
-
-./ioulive64 <ioulive-instance> <iou-instance> <ethernet-interface> <interface-id>
-
+ioulive64 must be started w
+```
+./ioulive64 [-v] -i <interface> [-n NETMAP] <instance-ID>
+```
 Arguments:
+    -i <interface>: Ethernet interface to bind to (e.g., eth0)
+    -n NETMAP: Optional path to the NETMAP file (default: NETMAP)
+    <instance-ID>: IOUlive64 instance number (e.g., 99)
 
-    <ioulive-instance>: Numeric ID for this IOUlive64 instance (e.g., 99)
+The instance number will be used to bind to a UNIX socket: /tmp/netio<UID>/<instance-ID>
 
-    <iou-instance>: Numeric ID of the IOU router you’re connecting to (e.g., 98)
+⚠️ Important: IOUlive64 must be run under the same Linux user as the IOU processes it communicates with.
+This ensures it can access the correct UNIX domain sockets in /tmp/netio<UID>/.
 
-    <ethernet-interface>: Name of the physical interface to use (e.g., eth0)
+## NETMAP Format
 
-    <interface-id>: Interface ID on the IOU router side (e.g., 0 for 0/0)
+The NETMAP file defines peer mappings, one per line:
 
-Example:
+### Format:
+```
+<source-instance>:<slot>/<port>@host   <dest-instance>:<slot>/<port>@host
+```
 
-./ioulive64 99 98 eth0 0
+### Example:
 
-This command:
+NETMAP content :
+```
+10:0/2@localhost     98:0/0@localhost
+```
 
-    Connects to the router’s socket: /tmp/netio$(id -u)/98
+Start IOUlive with: 
+```
+./ioulive64 -i eth0 98
+```
 
-    Binds its own socket at: /tmp/netio$(id -u)/99
+This setup means:
+    You are launching IOUlive instance 98
+    It connects to the peer router 10, interface 0/2
+    It bridges router 10’s interface 0/2 to the physical interface eth0
 
-    Bridges IOU interface 0/0 to the physical device eth0
+In terms of socket paths:
+    IOUlive binds to: /tmp/netio$(id -u)/98
+    It connects to: /tmp/netio$(id -u)/10
+
+So when the IOU router with ID 10 sends frames on its interface 0/2, they are picked up by IOUlive64 and forwarded to eth0.
+
+# Notes
+
+    Works only on Linux (requires AF_PACKET)
+    Designed for use with Cisco IOU virtual routers
+    Raw Ethernet access required (CAP_NET_RAW)
+    Multithreaded architecture
+
+# Acknowledgements
+
+    Original idea: Cisco Systems, Inc.
+    Legacy project: ioulive86 by Jeremy Gaddis
+    Inspired by the network emulator community
+
+# License
+
+This project is licensed under the terms of the GNU GPL v2.

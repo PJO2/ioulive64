@@ -60,7 +60,7 @@ return 0;
 
 
 // -----------------
-// Pase Netmap
+// Parse Netmap
 // now find the ioulive86 instance ID either at the left or right of the meshing specification
 // -----------------
 
@@ -72,7 +72,7 @@ int parse_netmap(const char *netmap_path, unsigned int live_instance, struct S_n
     int line_num = 1;
 
     if (!infp) {
-        printf("Cannot open %s\n\n", netmap_path);
+        fprintf(stderr, "Cannot open %s\n\n", netmap_path);
         return -1;
     }
 

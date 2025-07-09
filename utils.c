@@ -10,11 +10,13 @@
 // Timestamped printf
 void tsprintf(const char *format, ...) {
     va_list args;
-    time_t now = time(NULL);
-    struct tm *tm_now = localtime(&now);
+    struct tm tm_now;
     char timebuf[20];
-
-    strftime(timebuf, sizeof(timebuf), "%Y-%m-%d %H:%M:%S", tm_now);
+    time_t now;
+    
+    now = time(NULL);
+    localtime_r(&now, &tm_now);  // thread safe
+    strftime(timebuf, sizeof(timebuf), "%Y-%m-%d %H:%M:%S", &tm_now);
     printf("[%s] ", timebuf);
 
     va_start(args, format);

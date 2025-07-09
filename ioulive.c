@@ -7,6 +7,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <arpa/inet.h>
 #include <stdio.h>
 #include <time.h>
 #include <stdlib.h>
@@ -16,7 +17,23 @@
 
 
 #define IOULIVE_INTF_ID 0
-#define IOU_HEADER_LEN  8
+#define IOU_MTU         1522    // 1500 payload, 18 Ethernet header, 4 VLAN
+
+
+#pragma pack(push, 1)
+struct S_iou_data
+{
+    struct  {
+        short unsigned dst_instance;
+        short unsigned src_instance;
+        unsigned char  dst_intf;
+        unsigned char  src_intf;
+        unsigned char  unknown_1;
+        unsigned char  unknown_0;
+    } header;
+    unsigned char  payload[IOU_MTU];
+};
+#pragma pack(pop)
 
 
 // creates listening socket and let's peer write in it
@@ -28,7 +45,7 @@ struct sockaddr_un server;
     // should be then same user than the iou instance
     memset(&server, 0, sizeof(server));
     server.sun_family = AF_UNIX;
-    sprintf(server.sun_path, "/tmp/netio%u/%d", getuid(), instance);
+    snprintf(server.sun_path, sizeof(server.sun_path), "/tmp/netio%u/%d", getuid(), instance);
     if (verbosity>=VERBOSE) {
        printf("Opening server socket on %s\n", server.sun_path);
     }
@@ -47,16 +64,15 @@ struct sockaddr_un server;
 } // create_listening_skt
 
 
-// connect to peer socket after that we will write in it
+// connect to peer socket after that we will be able to write in it
 int connect_peer_skt (int peer_instance) {
 int skt;
 struct sockaddr_un router;
 
+    // Open client socket to router
     memset(&router, 0, sizeof(router));
     router.sun_family = AF_UNIX;
-	sprintf(router.sun_path, "/tmp/netio%u/%d", getuid(), peer_instance);
-
-    // Open client socket to router
+	snprintf(router.sun_path, sizeof(router.sun_path) "/tmp/netio%u/%d", getuid(), peer_instance);
     if ((skt = socket(AF_UNIX, SOCK_DGRAM, 0)) < 0 ) {
         perror("opening client socket");
         return -1;
@@ -65,6 +81,7 @@ struct sockaddr_un router;
     if (verbosity>=VERBOSE) {
        printf("Connecting to instance #%u using unix socket %s\n", peer_instance, router.sun_path);
     }
+    // wait until we are connected to peer instance, do not block
     while (connect(skt, (struct sockaddr *)&router, sizeof(router)) < 0) {
         sleep(2);
     }
@@ -76,9 +93,10 @@ struct sockaddr_un router;
 
 
 
-// receive from IOU, send to Ethernet
+// receive from an IOU innstance, send to Ethernet
 void iou_to_ethernet_loop(int rcv_sock, int raw_fd, int raw_dev_id, const struct S_netmap_unit *peer) {
-    char buf[1514+IOU_HEADER_LEN];
+
+    struct S_iou_data buf;
 
     if (verbosity>=VERY_VERBOSE) 
            tsprintf("Waiting on socket %d for IOU frame\n", rcv_sock);
@@ -86,46 +104,50 @@ void iou_to_ethernet_loop(int rcv_sock, int raw_fd, int raw_dev_id, const struct
         struct sockaddr_un peer_skt;
         socklen_t peerlen = sizeof(peer_skt);
 
-        ssize_t rval = recvfrom(rcv_sock, buf, sizeof(buf), 0, (struct sockaddr *)&peer_skt, &peerlen);
+        // receive from socket header + payload
+        ssize_t rval = recvfrom(rcv_sock, &buf, sizeof(buf), 0, (struct sockaddr *)&peer_skt, &peerlen);
 
         if (rval < 0) {
             perror("reading frame from IOU instance");
         } else if (rval == 0) {
             fprintf(stderr, "IOU instance ended connection\n");
+            sleep(1);
+        } else if (rval < sizeof(buf.header)) {
+            fprintf(stderr, "Received undersized frame (%ld bytes)\n", rval);
+            sleep(1);
         } else {
-            raw_send(raw_fd, raw_dev_id, &buf[IOU_HEADER_LEN], rval-IOU_HEADER_LEN);
+            raw_send(raw_fd, raw_dev_id, buf.payload, rval-sizeof(buf.header));
         }
         if (verbosity>=DEBUG)
               tsprintf("transmitted %d bytes from instance %d to Ethernet\n", 
-                        rval-IOU_HEADER_LEN, peer->instance);
+                        rval-sizeof(buf.header), peer->instance);
     }
 } // iou_to_ethernet_loop
 
 // receive from Ethernet, send to IOU
 void ethernet_to_iou_loop(int iou_sock, int raw_fd, int live_instance, const struct S_netmap_unit *peer) {
-    char buf[1514+IOU_HEADER_LEN];
+
+    struct S_iou_data buf;
+
+    // header will no changed, fill it now
+    buf.header.dst_instance = htons(peer->instance);
+    buf.header.src_instance = htons(live_instance);
+    buf.header.dst_intf     = peer->slot + peer->port*16; // a poor man 4 bits htons
+    buf.header.src_intf     = IOULIVE_INTF_ID;
+    buf.header.unknown_1    = 1;    // no idea of what is it can be ?
+    buf.header.unknown_0    = 0;
 
     if (verbosity>=VERY_VERBOSE) 
         tsprintf("Waiting for Ethernet frame on socket %d\n", raw_fd);
     while (1) {
-        ssize_t rval = raw_recv(raw_fd, &buf[IOU_HEADER_LEN], sizeof(buf)-IOU_HEADER_LEN);
+        ssize_t rval = raw_recv(raw_fd, buf.payload, sizeof(buf.payload));
 
         if (rval < 0) {
             perror("reading raw Ethernet frame");
         } else if (rval == 0) {
             fprintf(stderr, "raw Ethernet connection ended\n");
         } else {
-            // itf_id = peer->slot + peer->port*16;
-            buf[0] = peer->instance >> 8;
-            buf[1] = peer->instance & 0xFF;
-            buf[2] = live_instance >> 8;
-            buf[3] = live_instance & 0xFF;
-            buf[4] = peer->slot + peer->port*16;
-            buf[5] = IOULIVE_INTF_ID;
-            buf[6] = 1;
-            buf[7] = 0;
-
-            if (write(iou_sock, buf, rval+IOU_HEADER_LEN) < 0) {
+            if (write(iou_sock, &buf, rval+sizeof(buf.header)) < 0) {
                 fprintf(stderr, "IOU instance terminated: waiting for reconnection\n");
                 close(iou_sock);
                 break;
@@ -135,7 +157,6 @@ void ethernet_to_iou_loop(int iou_sock, int raw_fd, int live_instance, const str
               tsprintf("transmitted %d bytes from Ethernet to instance %d\n", rval, peer->instance);
     }
 } // ethernet_to_iou_loop
-
 
 
 // wrappers to decaps args

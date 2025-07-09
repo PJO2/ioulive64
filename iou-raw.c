@@ -29,26 +29,26 @@ int create_raw_socket(const char*name, int *dev_id)
 	struct packet_mreq mreq;
 	int sock;
 	struct ifreq if_req;
-	int fd;
+	int ioctl_fd;
 
     // Get interface index of Ethernet device
 	memset((void *) &if_req, 0, sizeof(if_req));
-	strcpy(if_req.ifr_name, name);
+	strncpy(if_req.ifr_name, name, sizeof(if_req.ifr_name) - 1);
 	// create dummy fd
-	if ((fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+	if ((ioctl_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
 		fprintf(stderr, "raw_get_dev_index: socket: %s\n", strerror(errno));
 		return (-1);
 	}
-	if (ioctl(fd, SIOCGIFINDEX, &if_req) < 0) {
+	if (ioctl(ioctl_fd, SIOCGIFINDEX, &if_req) < 0) {
 		fprintf(stderr, "raw_get_dev_index: SIOCGIFINDEX: %s\n", strerror(errno));
-		close(fd);
+		close(ioctl_fd);
 		return (-1);
 	}
-	close(fd);
+	close(ioctl_fd);
 
 	// now create real privileged socket
 	if ((sock = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ALL))) == -1) {
-		fprintf(stderr, "raw_init_socket: socket: %s\n", strerror(errno));
+		fprintf(stderr, "create_raw_socket: socket: %s\n", strerror(errno));
 		return (-1);
 	}
 
