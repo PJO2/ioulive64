@@ -129,7 +129,7 @@ void ethernet_to_iou_loop(int iou_sock, int raw_fd, int live_instance, const str
 
     struct S_iou_data buf;
 
-    // header will no changed, fill it now
+    // header will not change, fill it now
     buf.header.dst_instance = htons(peer->instance);
     buf.header.src_instance = htons(live_instance);
     buf.header.dst_intf     = peer->slot + peer->port*16; // a poor man 4 bits htons
@@ -185,6 +185,7 @@ void *ethernet_to_iou(void *arg) {
         }
 
         ethernet_to_iou_loop(snd_skt, args->raw_fd, args->ioulive_inst, &args->peer);
+        sleep(2);
     }
     return NULL;
 }
