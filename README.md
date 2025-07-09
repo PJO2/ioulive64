@@ -42,7 +42,7 @@ sudo setcap cap_net_raw=eip ./ioulive64
 ```
  This command grants cap_net_raw, allowing the program to open raw sockets while still running as a regular user.
 
-    ⚠️ Without this step, the application will fail to open the Ethernet socket unless run as root — which is not recommended.
+ ⚠️ Without this step, the application will fail to open the Ethernet socket unless run as root — which is not recommended.
 
 ✅ You can check the capability with:
 ```
@@ -75,6 +75,8 @@ The NETMAP file defines peer mappings, one per line:
 ```
 <source-instance>:<slot>/<port>@host   <dest-instance>:<slot>/<port>@host
 ```
+
+Even if the IOUlive instance doesn’t use a real slot/port, it must still include a slot/port entry (e.g., 0/0). This placeholder is required by the parser for format consistency.
 
 ## Example:
 
